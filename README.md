@@ -19,8 +19,8 @@ The api.histori.xyz file should contain your NGINX configuration. Ensure this fi
 ### How to Use the Bash Script
 - Step 1: Make the Script Executable
 ```bash
-chmod +x setup_nginx_prometheus_grafana.sh
-sudo ./setup_nginx_prometheus_grafana.sh
+chmod +x apply_nginx_config.sh
+sudo ./apply_nginx_config.sh
 ```
 The script will:
 
