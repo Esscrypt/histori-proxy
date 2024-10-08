@@ -58,7 +58,7 @@ http {
                     ngx.exit(500)
                 end
 
-                local res, err = db:query("SELECT server FROM users WHERE api_key = " .. ngx.quote_sql_str(api_key))
+                local res, err = db:query("SELECT serverIp FROM users WHERE api_key = " .. ngx.quote_sql_str(api_key))
 
                 if not res or err or #res == 0 then
                     ngx.exit(403)
