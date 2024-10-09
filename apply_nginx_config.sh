@@ -14,11 +14,13 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Update and install system packages if not updated
-echo "Updating system packages..."
+# Install necessary dependencies: NGINX, Prometheus, Grafana, LuaJIT, and lua-resty-postgres, lua-resty-prometheus
+echo "Installing necessary dependencies..."
+
+# Update and install system packages
 apt-get update
 
-# Install NGINX if not installed
+# Install NGINX if not already installed
 if ! dpkg -s nginx &> /dev/null; then
     echo "Installing NGINX..."
     apt-get install -y nginx
@@ -26,32 +28,45 @@ else
     echo "NGINX is already installed, skipping installation."
 fi
 
-# Install Lua and dependencies if not installed
-if ! dpkg -s lua5.1 liblua5.1-dev libnginx-mod-http-lua lua-resty-core &> /dev/null; then
-    echo "Installing Lua 5.1 and necessary modules..."
-    apt-get install -y lua5.1 liblua5.1-dev libnginx-mod-http-lua lua-resty-core
+# Install Lua5.1 and related packages if not already installed
+if ! dpkg -s lua5.1 liblua5.1-dev libnginx-mod-http-lua &> /dev/null; then
+    echo "Installing Lua5.1 and necessary packages..."
+    apt-get install -y lua5.1 liblua5.1-dev libnginx-mod-http-lua
 else
-    echo "Lua 5.1 and necessary modules are already installed, skipping."
+    echo "Lua5.1 and necessary packages are already installed, skipping installation."
 fi
 
-# Install LuaRocks and lua-resty-postgres if not installed
-if ! command -v luarocks &> /dev/null || ! luarocks list | grep -q lua-resty-postgres; then
-    echo "Installing LuaRocks and lua-resty-postgres..."
+# Install LuaRocks and lua-resty-postgres, lua-resty-prometheus if not installed
+if ! command -v luarocks &> /dev/null; then
+    echo "Installing LuaRocks..."
     apt-get install -y luarocks
+fi
+
+# Install lua-resty-postgres if not already installed
+if ! luarocks list | grep -q lua-resty-postgres; then
+    echo "Installing lua-resty-postgres..."
     luarocks install lua-resty-postgres
 else
-    echo "LuaRocks and lua-resty-postgres are already installed."
+    echo "lua-resty-postgres is already installed, skipping installation."
 fi
 
-# Install Certbot if not installed
+# Install lua-resty-prometheus if not already installed
+if ! luarocks list | grep -q lua-resty-prometheus; then
+    echo "Installing lua-resty-prometheus..."
+    luarocks install lua-resty-prometheus
+else
+    echo "lua-resty-prometheus is already installed, skipping installation."
+fi
+
+# Install Certbot and related packages if not installed
 if ! dpkg -s certbot python3-certbot-nginx &> /dev/null; then
-    echo "Installing Certbot..."
+    echo "Installing Certbot and related packages..."
     apt-get install -y certbot python3-certbot-nginx
 else
-    echo "Certbot is already installed, skipping."
+    echo "Certbot is already installed, skipping installation."
 fi
 
-# Install Prometheus if not installed
+# Install Prometheus if not already installed
 if ! command -v prometheus &> /dev/null; then
     echo "Installing Prometheus..."
     wget https://github.com/prometheus/prometheus/releases/download/v2.46.0/prometheus-2.46.0.linux-amd64.tar.gz
@@ -63,7 +78,7 @@ if ! command -v prometheus &> /dev/null; then
     cp -r prometheus-*/consoles /etc/prometheus/
     cp -r prometheus-*/console_libraries /etc/prometheus/
 
-    # Create Prometheus service
+    # Create Prometheus systemd service
     cat <<EOL > /etc/systemd/system/prometheus.service
 [Unit]
 Description=Prometheus
@@ -82,15 +97,15 @@ ExecStart=/usr/local/bin/prometheus \\
 WantedBy=multi-user.target
 EOL
 
-    # Reload systemd and start Prometheus
+    # Reload systemd, enable and start Prometheus service
     systemctl daemon-reload
     systemctl enable prometheus
     systemctl start prometheus
 else
-    echo "Prometheus is already installed, skipping."
+    echo "Prometheus is already installed, skipping installation."
 fi
 
-# Install Grafana if not installed
+# Install Grafana if not already installed
 if ! dpkg -s grafana &> /dev/null; then
     echo "Installing Grafana..."
     wget https://dl.grafana.com/oss/release/grafana_8.3.0_amd64.deb
@@ -98,7 +113,7 @@ if ! dpkg -s grafana &> /dev/null; then
     systemctl enable grafana-server
     systemctl start grafana-server
 else
-    echo "Grafana is already installed, skipping."
+    echo "Grafana is already installed, skipping installation."
 fi
 
 # Copy NGINX config file if not already present
