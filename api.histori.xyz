@@ -1,107 +1,92 @@
-# Top-level http block (should not be inside a server block)
-http {
-    lua_shared_dict prometheus_metrics 10M;
+server {
+    listen 80;
+    server_name api.histori.xyz;
 
-    init_by_lua_block {
-        prometheus = require("prometheus").init("prometheus_metrics")
-        metric_requests = prometheus:counter("nginx_http_requests_total", "Total number of HTTP requests", {"host", "status"})
-        metric_connections = prometheus:gauge("nginx_http_connections", "Number of HTTP connections", {"state"})
+    # Redirect HTTP to HTTPS
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;
+    server_name api.histori.xyz;
+
+    ssl_certificate /etc/letsencrypt/live/api.histori.xyz/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.histori.xyz/privkey.pem;
+
+    # Prometheus metrics endpoint
+    location /metrics {
+        allow 127.0.0.1;
+        deny all;
+        content_by_lua_block {
+            prometheus:collect()
+        }
     }
 
-    log_by_lua_block {
-        metric_requests:inc(1, {ngx.var.host, ngx.var.status})
+    location / {
+        # Rate limiting
+        limit_req zone=perip_api burst=50 nodelay;
+
+        set_by_lua_block $dynamic_backend_ip {
+            local api_key = ngx.var.http_x_api_key
+            if not api_key or api_key == "" then
+                ngx.exit(403)
+            end
+
+            local pg = require "resty.postgres"
+            local db, err = pg:new()
+
+            db:set_timeout(1000)
+
+            local ok, err = db:connect{
+                url = os.getenv("DATABASE_URL")
+            }
+
+            if not ok then
+                ngx.exit(500)
+            end
+
+            local res, err = db:query("SELECT serverIp FROM users WHERE api_key = " .. ngx.quote_sql_str(api_key))
+
+            if not res or err or #res == 0 then
+                ngx.exit(403)
+            end
+
+            local server_ip = res[1].server
+            db:set_keepalive(10000, 10)
+
+            return server_ip
+        }
+
+        proxy_pass http://$dynamic_backend_ip;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        add_header 'Access-Control-Allow-Origin' '*' always;
+        add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
+        add_header 'Access-Control-Allow-Headers' 'Authorization, X-API-KEY, Content-Type, Accept, Origin, X-Requested-With, Referer, User-Agent' always;
+        add_header 'Access-Control-Allow-Credentials' 'true' always;
+
+        if ($request_method = OPTIONS) {
+            add_header 'Access-Control-Max-Age' 1728000;
+            add_header 'Content-Length' 0;
+            add_header 'Content-Type' 'text/plain; charset=utf-8';
+            return 204;
+        }
+
+        if ($http_x_api_key = "") {
+            return 403 "Forbidden: Missing API Key";
+        }
     }
 
-    server {
-        listen 80;
-        server_name api.histori.xyz;
-
-        # Redirect HTTP to HTTPS
-        return 301 https://$host$request_uri;
+    error_page 429 = @error429;
+    location @error429 {
+        return 429 "Too many requests: Rate limit exceeded.";
     }
 
-    server {
-        listen 443 ssl;
-        server_name api.histori.xyz;
-
-        ssl_certificate /etc/letsencrypt/live/api.histori.xyz/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/api.histori.xyz/privkey.pem;
-
-        # Prometheus metrics endpoint
-        location /metrics {
-            allow 127.0.0.1;
-            deny all;
-            content_by_lua_block {
-                prometheus:collect()
-            }
-        }
-
-        location / {
-            # Rate limiting
-            limit_req zone=perip_api burst=50 nodelay;
-
-            set_by_lua_block $dynamic_backend_ip {
-                local api_key = ngx.var.http_x_api_key
-                if not api_key or api_key == "" then
-                    ngx.exit(403)
-                end
-
-                local pg = require "resty.postgres"
-                local db, err = pg:new()
-
-                db:set_timeout(1000)
-
-                local ok, err = db:connect{
-                    url = os.getenv("DATABASE_URL")
-                }
-
-                if not ok then
-                    ngx.exit(500)
-                end
-
-                local res, err = db:query("SELECT serverIp FROM users WHERE api_key = " .. ngx.quote_sql_str(api_key))
-
-                if not res or err or #res == 0 then
-                    ngx.exit(403)
-                end
-
-                local server_ip = res[1].server
-                db:set_keepalive(10000, 10)
-
-                return server_ip
-            }
-
-            proxy_pass http://$dynamic_backend_ip;
-            proxy_set_header Host $host;
-            proxy_set_header X-Real-IP $remote_addr;
-            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto $scheme;
-
-            add_header 'Access-Control-Allow-Origin' '*' always;
-            add_header 'Access-Control-Allow-Methods' 'GET, POST, PUT, DELETE, OPTIONS' always;
-            add_header 'Access-Control-Allow-Headers' 'Authorization, X-API-KEY, Content-Type, Accept, Origin, X-Requested-With, Referer, User-Agent' always;
-            add_header 'Access-Control-Allow-Credentials' 'true' always;
-
-            if ($request_method = OPTIONS) {
-                add_header 'Access-Control-Max-Age' 1728000;
-                add_header 'Content-Length' 0;
-                add_header 'Content-Type' 'text/plain; charset=utf-8';
-                return 204;
-            }
-
-            if ($http_x_api_key = "") {
-                return 403 "Forbidden: Missing API Key";
-            }
-        }
-
-        error_page 429 = @error429;
-        location @error429 {
-            return 429 "Too many requests: Rate limit exceeded.";
-        }
-
-        error_page 403 = @error403;
-        location @error403 {
-            return 403 "Forbidden: Invalid or missing API Key";
-        }
+    error_page 403 = @error403;
+    location @error403 {
+        return 403 "Forbidden: Invalid or missing API Key";
     }
 }

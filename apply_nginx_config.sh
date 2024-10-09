@@ -14,13 +14,11 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Install necessary dependencies: NGINX, Prometheus, Grafana, LuaJIT, and lua-resty-postgres
-echo "Installing necessary dependencies..."
-
-# Update and install system packages
+# Update and install system packages if not updated
+echo "Updating system packages..."
 apt-get update
 
-# Install NGINX if not already installed
+# Install NGINX if not installed
 if ! dpkg -s nginx &> /dev/null; then
     echo "Installing NGINX..."
     apt-get install -y nginx
@@ -28,12 +26,12 @@ else
     echo "NGINX is already installed, skipping installation."
 fi
 
-# Install Lua5.1 and related packages if not already installed
-if ! dpkg -s lua5.1 liblua5.1-dev libnginx-mod-http-lua &> /dev/null; then
-    echo "Installing Lua5.1 and necessary packages..."
-    apt-get install -y lua5.1 liblua5.1-dev libnginx-mod-http-lua
+# Install Lua and dependencies if not installed
+if ! dpkg -s lua5.1 liblua5.1-dev libnginx-mod-http-lua lua-resty-core &> /dev/null; then
+    echo "Installing Lua 5.1 and necessary modules..."
+    apt-get install -y lua5.1 liblua5.1-dev libnginx-mod-http-lua lua-resty-core
 else
-    echo "Lua5.1 and necessary packages are already installed, skipping installation."
+    echo "Lua 5.1 and necessary modules are already installed, skipping."
 fi
 
 # Install LuaRocks and lua-resty-postgres if not installed
@@ -42,18 +40,18 @@ if ! command -v luarocks &> /dev/null || ! luarocks list | grep -q lua-resty-pos
     apt-get install -y luarocks
     luarocks install lua-resty-postgres
 else
-    echo "LuaRocks and lua-resty-postgres are already installed, skipping installation."
+    echo "LuaRocks and lua-resty-postgres are already installed."
 fi
 
-# Install Certbot and related packages if not installed
+# Install Certbot if not installed
 if ! dpkg -s certbot python3-certbot-nginx &> /dev/null; then
-    echo "Installing Certbot and related packages..."
+    echo "Installing Certbot..."
     apt-get install -y certbot python3-certbot-nginx
 else
-    echo "Certbot is already installed, skipping installation."
+    echo "Certbot is already installed, skipping."
 fi
 
-# Install Prometheus if not already installed
+# Install Prometheus if not installed
 if ! command -v prometheus &> /dev/null; then
     echo "Installing Prometheus..."
     wget https://github.com/prometheus/prometheus/releases/download/v2.46.0/prometheus-2.46.0.linux-amd64.tar.gz
@@ -65,7 +63,7 @@ if ! command -v prometheus &> /dev/null; then
     cp -r prometheus-*/consoles /etc/prometheus/
     cp -r prometheus-*/console_libraries /etc/prometheus/
 
-    # Create Prometheus systemd service
+    # Create Prometheus service
     cat <<EOL > /etc/systemd/system/prometheus.service
 [Unit]
 Description=Prometheus
@@ -84,15 +82,15 @@ ExecStart=/usr/local/bin/prometheus \\
 WantedBy=multi-user.target
 EOL
 
-    # Reload systemd, enable and start Prometheus service
+    # Reload systemd and start Prometheus
     systemctl daemon-reload
     systemctl enable prometheus
     systemctl start prometheus
 else
-    echo "Prometheus is already installed, skipping installation."
+    echo "Prometheus is already installed, skipping."
 fi
 
-# Install Grafana if not already installed
+# Install Grafana if not installed
 if ! dpkg -s grafana &> /dev/null; then
     echo "Installing Grafana..."
     wget https://dl.grafana.com/oss/release/grafana_8.3.0_amd64.deb
@@ -100,49 +98,54 @@ if ! dpkg -s grafana &> /dev/null; then
     systemctl enable grafana-server
     systemctl start grafana-server
 else
-    echo "Grafana is already installed, skipping installation."
+    echo "Grafana is already installed, skipping."
 fi
 
-# Copy NGINX configuration from the local "api.histori.xyz" file if it doesn't exist
+# Copy NGINX config file if not already present
 if [ ! -f /etc/nginx/sites-available/api.histori.xyz ]; then
     if [ -f api.histori.xyz ]; then
         cp api.histori.xyz /etc/nginx/sites-available/api.histori.xyz
     else
-        echo "NGINX configuration file api.histori.xyz not found! Exiting..."
+        echo "NGINX config file 'api.histori.xyz' not found! Exiting..."
         exit 1
     fi
 else
-    echo "NGINX configuration file already exists, skipping copy."
+    echo "NGINX config already exists, skipping."
 fi
 
-# Symlink the configuration to sites-enabled
+# Copy the main nginx.conf if necessary
+if [ -f nginx.conf ]; then
+    cp nginx.conf /etc/nginx/nginx.conf
+else
+    echo "No local 'nginx.conf' found. Skipping copy."
+fi
+
+# Symlink configuration to sites-enabled
 ln -sf /etc/nginx/sites-available/api.histori.xyz /etc/nginx/sites-enabled/
 
-# Test NGINX configuration for errors
+# Test NGINX configuration
 nginx -t
 if [ $? -ne 0 ]; then
     echo "NGINX configuration test failed! Exiting..."
     exit 1
 fi
 
-# Reload NGINX to apply changes
+# Reload NGINX
 systemctl reload nginx
 
-# Set up Prometheus scraping configuration to monitor NGINX
+# Set up Prometheus to scrape NGINX metrics if not already configured
 if ! grep -q "job_name: 'nginx'" /etc/prometheus/prometheus.yml; then
-    echo "Setting up Prometheus to scrape NGINX metrics..."
+    echo "Configuring Prometheus to scrape NGINX metrics..."
     cat <<EOL >> /etc/prometheus/prometheus.yml
 scrape_configs:
   - job_name: 'nginx'
     static_configs:
       - targets: ['localhost:443/metrics']
 EOL
-
-    # Reload Prometheus with the new configuration
     systemctl restart prometheus
 else
-    echo "Prometheus scraping configuration for NGINX is already set up, skipping."
+    echo "Prometheus already configured to scrape NGINX metrics."
 fi
 
-# Print success message
-echo "NGINX, Prometheus, and Grafana setup completed successfully!"
+# Success message
+echo "Setup of NGINX, Prometheus, and Grafana completed successfully!"
