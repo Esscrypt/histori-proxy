@@ -1,3 +1,4 @@
+# Top-level http block (should not be inside a server block)
 http {
     lua_shared_dict prometheus_metrics 10M;
 
@@ -15,7 +16,7 @@ http {
         listen 80;
         server_name api.histori.xyz;
 
-        # Redirect HTTP traffic to HTTPS
+        # Redirect HTTP to HTTPS
         return 301 https://$host$request_uri;
     }
 
@@ -26,7 +27,7 @@ http {
         ssl_certificate /etc/letsencrypt/live/api.histori.xyz/fullchain.pem;
         ssl_certificate_key /etc/letsencrypt/live/api.histori.xyz/privkey.pem;
 
-        # Prometheus metrics endpoint - accessible only locally
+        # Prometheus metrics endpoint
         location /metrics {
             allow 127.0.0.1;
             deny all;
@@ -36,7 +37,7 @@ http {
         }
 
         location / {
-            # Rate limiting: 50 requests per second
+            # Rate limiting
             limit_req zone=perip_api burst=50 nodelay;
 
             set_by_lua_block $dynamic_backend_ip {
