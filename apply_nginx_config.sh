@@ -102,16 +102,12 @@ else
 fi
 
 # Copy NGINX config file if not already present
-if [ ! -f /etc/nginx/sites-available/api.histori.xyz ]; then
-    if [ -f api.histori.xyz ]; then
-        cp api.histori.xyz /etc/nginx/sites-available/api.histori.xyz
-    else
-        echo "NGINX config file 'api.histori.xyz' not found! Exiting..."
-        exit 1
-    fi
+if [ -f api.histori.xyz ]; then
+    cp api.histori.xyz /etc/nginx/sites-available/api.histori.xyz
 else
-    echo "NGINX config already exists, skipping."
+    echo "NGINX config file 'api.histori.xyz' not found! Skipping copy."
 fi
+
 
 # Copy the main nginx.conf if necessary
 if [ -f nginx.conf ]; then
